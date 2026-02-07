@@ -84,7 +84,7 @@ DATA_FILE = "grievances.csv"
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=[
         "id","name","city","location","type","description",
-        "department","sentiment","priority","status","created_at"
+        "department","sentiment","priority","status","created_at","image"
     ]).to_csv(DATA_FILE, index=False)
 
 def load_data():
@@ -92,6 +92,19 @@ def load_data():
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
+
+def save_uploaded_file(uploaded_file):
+    """Save uploaded file and return the filename"""
+    if uploaded_file is not None:
+        import os
+        upload_dir = "uploads"
+        if not os.path.exists(upload_dir):
+            os.makedirs(upload_dir)
+        file_path = os.path.join(upload_dir, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        return file_path
+    return ""
 # ---------------- CITY DROPDOWN ----------------
 city_list = [
     "Nagpur","Wardha","Jabalpur","Bhopal","Patna","Jamshedpur",
@@ -101,12 +114,15 @@ city_list = [
 ]
 # ================== AI FUNCTIONS ==================
 def analyze_sentiment(text):
-    p = TextBlob(text).sentiment.polarity
-    if p < -0.3:
-        return "Negative 😠"
-    elif p < 0.1:
+    try:
+        p = TextBlob(text).sentiment.polarity
+        if p < -0.3:
+            return "Negative 😠"
+        elif p < 0.1:
+            return "Neutral 😐"
+        return "Positive 😊"
+    except:
         return "Neutral 😐"
-    return "Positive 😊"
 
 def detect_priority(text):
     t = text.lower()
@@ -118,17 +134,17 @@ def detect_priority(text):
 
 
 def route_department(gtype):
-    return {
-         "Public Safety": "🚓 Police",
-        "Sanitation": "🧹 Municipal",
-        "Infrastructure": "🏗 PWD",
-        "Healthcare": "🏥 Health Dept",
-        "Utilities": "⚡ Electricity Board",
-        "Education": "🎓 Education Dept",
-        "Administrative Delay": "📂 General Admin",
-        "Other": "📂 General Admin"
-
-    }.get(gtype, "General Admin")
+    dept_map = {
+        "🚨 Public Safety": "🚓 Police",
+        "🗑 Sanitation": "🧹 Municipal",
+        "🏗 Infrastructure": "🏗 PWD",
+        "🏥 Healthcare": "🏥 Health Dept",
+        "💡 Utilities": "⚡ Electricity Board",
+        "🏫 Education": "🎓 Education Dept",
+        "⌛ Administrative Delay": "📂 General Admin",
+        "📝 Other": "📂 General Admin"
+    }
+    return dept_map.get(gtype, "📂 General Admin")
 
 # ================== HEADER ==================
 st.markdown("""
@@ -159,7 +175,7 @@ if role == "Citizen":
     with st.container():
         c1, c2, c3 = st.columns(3)
         name = c1.text_input("👤 Your Name", placeholder="Enter your full name")
-        city = c2.text_input("🏙 City", placeholder="E.g., Delhi, Mumbai")
+        city = c2.selectbox("🏙 City", city_list)
         location = c3.selectbox("📍 Area", ["Urban","Semi-Urban","Rural"], help="Select your locality type")
 
         gtype = st.selectbox(
@@ -177,11 +193,20 @@ if role == "Citizen":
             placeholder="Provide as many details as possible to help us address it efficiently"
         )
 
+        uploaded_image = st.file_uploader(
+            "📸 Upload Evidence (Optional)", 
+            type=["jpg", "jpeg", "png", "gif"],
+            help="Upload a photo or screenshot as evidence"
+        )
+
     if st.button("🚀 Analyze & Submit", use_container_width=True):
         if not description or not city:
             st.error("❗ City & description are required to submit a grievance")
         else:
             sid = str(uuid.uuid4())[:8]
+            
+            # Save uploaded image if exists
+            image_path = save_uploaded_file(uploaded_image)
 
             new = {
                 "id": sid,
@@ -194,7 +219,8 @@ if role == "Citizen":
                 "sentiment": analyze_sentiment(description),
                 "priority": detect_priority(description),
                 "status": "Submitted",
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "image": image_path
             }
 
             df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
@@ -206,65 +232,112 @@ if role == "Citizen":
             m1, m2, m3 = st.columns(3)
 
             # Add icons
-            sentiment_icon = {"Positive":"😊","Neutral":"😐","Negative":"😠"}
-            priority_icon = {"High":"🔴","Medium":"🟠","Low":"🟢"}
+            sentiment_icon = {"Positive 😊":"Positive 😊","Neutral 😐":"Neutral 😐","Negative 😠":"Negative 😠"}
+            priority_icon = {"High 🔥":"High 🔥","Medium ⚠️":"Medium ⚠️","Low 🟢":"Low 🟢"}
 
-            m1.metric("Sentiment", f"{sentiment_icon[new['sentiment']]} {new['sentiment']}")
-            m2.metric("Priority", f"{priority_icon[new['priority']]} {new['priority']}")
-            m3.metric("Department", f"🏢 {new['department']}")
+            m1.metric("Sentiment", new['sentiment'])
+            m2.metric("Priority", new['priority'])
+            m3.metric("Department", new['department'])
+            
+            if image_path:
+                st.image(uploaded_image, caption="📷 Uploaded Evidence")
 
     st.markdown("## 🕒 Your Recent Complaints")
     st.info("Here are your last 5 submitted grievances.")
-    st.dataframe(df[df["name"] == name].tail(5), use_container_width=True)
+    if not df.empty:
+        user_complaints = df[df["name"] == name] if name else df.head(0)
+        if not user_complaints.empty:
+            st.dataframe(user_complaints.tail(5), use_container_width=True)
+        else:
+            st.info("No complaints submitted yet.")
+    else:
+        st.info("No complaints in the system yet.")
 
 # ================== ADMIN DASHBOARD ==================
 else:
-    st.markdown("## 💻 Admin Dashboard")
-    st.info("Monitor complaints, update status, and track department performance.")
+    st.header("🖥 Admin Dashboard")
+    col1,col2,col3 = st.columns(3)
+    col1.metric("📨 Total",len(df))
+    col2.metric("⏳ Pending",len(df[df["status"].str.contains("Submitted", na=False)]))
+    col3.metric("✅ Resolved",len(df[df["status"].str.contains("Resolved", na=False)]))
+
+    st.divider()
+
+    st.subheader("📋 Complaint Details")
 
     if df.empty:
-        st.warning("No complaints available yet")
-        st.stop()
+        st.info("No complaints available.")
+    else:
+        selected_id = st.selectbox("Select Complaint ID",df["id"].tolist())
+        selected = df[df["id"]==selected_id].iloc[0]
 
-    a1, a2, a3 = st.columns(3)
-    a1.metric("📋 Total Complaints", len(df))
-    a2.metric("✅ Resolved", len(df[df["status"]=="Resolved"]))
-    a3.metric("⏳ Pending", len(df[df["status"]!="Resolved"]))
+        details_df = pd.DataFrame({
+            "Field":[
+                "👤 Name","🏙 City","📍 Location","📂 Type",
+                "🏢 Department","🔥 Priority","😊 Sentiment",
+                "📅 Created","📌 Status"
+            ],
+            "Value":[
+                selected["name"],
+                selected["city"],
+                selected["location"],
+                selected["type"],
+                selected["department"],
+                selected["priority"],
+                selected["sentiment"],
+                selected["created_at"],
+                selected["status"]
+            ]
+        })
+
+        st.table(details_df)
+
+        # Show Image safely
+        if "image" in selected and isinstance(selected["image"], str) and selected["image"] != "":
+            if os.path.exists(selected["image"]):
+                st.image(selected["image"], caption="Uploaded Evidence 📷")
+
+        status_options = ["Submitted ⏳","In Progress 🔧","Resolved ✅"]
+
+        current_status = selected["status"]
+        if current_status not in status_options:
+            current_status = "Submitted ⏳"
+
+        new_status = st.selectbox(
+            "Update Status",
+            status_options,
+            index=status_options.index(current_status) if current_status in status_options else 0
+        )
+
+        if st.button("💾 Update Status"):
+            df.loc[df["id"]==selected_id,"status"] = new_status
+            save_data(df)
+            st.success("Status Updated Successfully ✅")
+            st.rerun()
 
     st.divider()
 
-    selected_id = st.selectbox("Select Complaint ID to view", df["id"].tolist(), help="Choose a complaint to view details or update status")
-    selected = df[df["id"] == selected_id].iloc[0]
+    st.subheader("📊 Department Performance")
 
-    st.markdown("### 📄 Complaint Details")
-    st.write(selected)
-
-    status_options = ["Submitted","In Progress","Resolved"]
-    new_status = st.selectbox(
-        "Update Status", status_options, 
-        index=status_options.index(selected["status"]),
-        help="Change the complaint status and save"
-    )
-
-    if st.button("💾 Save Status"):
-        df.loc[df["id"] == selected_id, "status"] = new_status
-        save_data(df)
-        st.success(f"Status updated to **{new_status}**")
-
-    st.divider()
-
-    st.markdown("## 📈 Department Performance")
     chart = df.groupby("department").size().reset_index(name="count")
+
     fig = px.bar(
-        chart, x="department", y="count", color="department",
-        title="Number of Complaints per Department"
+        chart,
+        x="department",
+        y="count",
+        color="department",
+        text="count",
+        color_discrete_sequence=px.colors.qualitative.Bold
     )
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(showlegend=False)
+    fig.update_traces(textposition="outside")
+    st.plotly_chart(fig,use_container_width=True)
 
-    st.markdown("## 🗺 City Heatmap")
-    st.info("Circle size indicates the number of complaints reported from each city.")
+    st.divider()
 
-    CITY_COORDS = {
+    st.subheader("🗺 Complaint Map")
+
+    city_coords = {
         "Nagpur":[21.1458,79.0882],
         "Wardha":[20.7453,78.6022],
         "Jabalpur":[23.1815,79.9864],
@@ -289,19 +362,21 @@ else:
         "Delhi":[28.6139,77.2090]
     }
 
-    city_count = df.groupby("city").size().reset_index(name="count")
-    m = folium.Map(location=[20.59, 78.96], zoom_start=5)
+    m = folium.Map(location=[22.5,80],zoom_start=5)
 
-    for _, r in city_count.iterrows():
-        folium.CircleMarker(
-            location=CITY_COORDS.get(r["city"], [20.59, 78.96]),
-            radius=5 + r["count"] * 2,
-            popup=f"{r['city']} : {r['count']} complaints",
-            color="#e74c3c",
-            fill=True,
-            fill_opacity=0.6
-        ).add_to(m)
+    city_counts = df["city"].value_counts().to_dict()
 
-    st_folium(m, width=800)
+    for city,count in city_counts.items():
+        if city in city_coords:
+            folium.CircleMarker(
+                location=city_coords[city],
+                radius=6+count,
+                popup=f"{city}: {count} complaints",
+                color="red",
+                fill=True,
+                fill_opacity=0.7
+            ).add_to(m)
 
-st.caption("💡 Built with Streamlit • NLP • AI for Smart Governance")
+    st_folium(m,width=1000,height=500)
+
+st.caption("💡 Built with Streamlit, NLP & AI for Smart Governance 🚀")
