@@ -4,9 +4,9 @@ import os
 import uuid
 from datetime import datetime
 from textblob import TextBlob
-import plotly.express as px
-import folium
-from streamlit_folium import st_folium
+import plotly.express as px   
+import folium 
+from streamlit_folium import st_folium 
 
 # ================== PAGE CONFIG ==================
 st.set_page_config(
@@ -142,15 +142,12 @@ st.write("")
 with st.container():
     col1, col2 = st.columns([2,1])
     role = col1.selectbox("Login Role", ["Citizen", "Admin"])
-    password = col2.text_input("Password", type="password")
+    password = col2.text_input("Password", type="password") if role == "Admin" else ""
 
-if role == "Admin" and password != os.getenv("ADMIN_PASS", "admin"):
-    st.error("❌ Invalid admin password")
-    st.stop()
-
-if role == "Citizen" and not password:
-    st.warning("⚠️ Password required")
-    st.stop()
+if role == "Admin":
+    if not password or password != os.getenv("ADMIN_PASS", "admin"):
+        st.error("❌ Invalid admin password")
+        st.stop()
 
 df = load_data()
 
